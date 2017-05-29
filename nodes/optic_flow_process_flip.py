@@ -98,7 +98,8 @@ def control_calc(num_harmonics, gamma_size, Qdot_meas):
     c_psi = 1 
     c_d = 1
 
-    dg = 1/gamma_size
+    dg = gamma[2] - gamma[1];
+
     gamma = np.linspace(-math.pi, math.pi-dg, gamma_size)
     Qdot_WF = [0]*gamma_size
     Qdot_SF = [0]*gamma_size
@@ -118,16 +119,16 @@ def control_calc(num_harmonics, gamma_size, Qdot_meas):
     # Compute the rest of the coefficients
     for n in range(num_harmonics):
         for i in range(gamma_size):
-            a[n] += math.cos(n*gamma[i])*Qdot_meas[i]
-            b[n] += math.sin(n*gamma[i])*Qdot_meas[i] 
+            a[n] += math.cos((n+1)*gamma[i])*Qdot_meas[i]
+            b[n] += math.sin((n+1)*gamma[i])*Qdot_meas[i] 
         a[n] *= dg/math.pi
         b[n] *= dg/math.pi
 
     # Calculate Qdot_WF
-    for n in range(num_harmonics):
-        for i in range(gamma_size):
-            Qdot_WF[i] += a[n]*math.cos(n*gamma[i]) + b[n]*math.sin(n*gamma[i])
-    Qdot_WF[:] = [x + a_0/2 for x in Qdot_WF]
+    for i in range(gamma_size):
+        for n in range(num_harmonics):
+            Qdot_WF[i] += a[n]*math.cos((n+1)*gamma[i]) + b[n]*math.sin((n+1)*gamma[i])
+        Qdot_WF[i] += a_0/2
 
     # Calculate Qdot_SF
     Qdot_SF = np.subtract(Qdot_meas, Qdot_WF)
@@ -192,6 +193,7 @@ class Optic_Flow_Calculator:
         b = [0]*self.num_harmonics
         a_0 = 0.0
         Qdot_SF = [0]*self.gamma_size
+    
     def image_callback(self,image):
         try: # if there is an image
             # Acquire the image, and convert to single channel gray image
