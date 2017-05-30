@@ -2,7 +2,7 @@
 
 # ROS imports
 import roslib, rospy
-
+from __future__ import division
 # opencv imports
 import cv2
 
