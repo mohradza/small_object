@@ -1,8 +1,8 @@
 #!/usr/bin/env python
+from __future__ import division
 
 # ROS imports
 import roslib, rospy
-
 # opencv imports
 import cv2
 
@@ -50,9 +50,9 @@ def define_rings_at_which_to_track_optic_flow(image, gamma_size, num_rings):
     x_center = int(image.shape[0]/2)
     y_center = int(image.shape[1]/2)
     # This needs to be changed for 320 x 240 image and parabolics mirror
-    inner_radius = 100 
-    dg=1/gamma_size 
-    gamma = np.linspace(0, 2*math.pi-dg, gamma_size)
+    inner_radius = 100  
+    gamma = np.linspace(0, 2*math.pi-.017, gamma_size)
+    dg = gamma[2] - gamma[1]
     dr = 5
    
     for ring in range(num_rings):
@@ -65,11 +65,10 @@ def define_rings_at_which_to_track_optic_flow(image, gamma_size, num_rings):
     return points_to_track
 
 
-def average_ring_flow(self, message, num_rings, gamma_size,flow):
+def average_ring_flow(self, num_rings, gamma_size,flow):
     total_OF_tang = [0]*gamma_size
-    total_OF_r = [0]*gamma_size
-    dg = 1/gamma_size
-    gamma = np.linspace(0, 2*math.pi-dg, gamma_size)
+    OF_reformat = [0]*gamma_size
+    gamma = np.linspace(0, 2*math.pi-.017, gamma_size)
     for ring in range(num_rings):
        	for i in range(gamma_size):
           	index = ring*gamma_size + i
@@ -79,79 +78,75 @@ def average_ring_flow(self, message, num_rings, gamma_size,flow):
             	total_OF_tang[i] = total_OF_tang[i]+(-1*flow[index][0,0]*math.cos(gamma[i])+flow[index][0,1]*math.sin(gamma[i]))
        
     total_OF_tang[:] = [x / num_rings for x in total_OF_tang]
-    # Publish Qdot_meas and Qdot_SF msg
-    msg = OpticFlowMsg()
-    msg.header.stamp = rospy.Time.now()
-    msg.Qdot_meas = total_OF_tang
-    self.optic_flow_pub.publish(msg)
-            
+    
+    # Reformat so that optic flow is -pi -> pi
+    for i in range(gamma_size):
+        # For the case of gamma_size = 30
+        # gamma_size/2 = 15
+        if (i < (gamma_size//2)):
+            OF_reformat[i] = -total_OF_tang[gamma_size//2 - i]
+        # THIS IS SPECIFIC TO gamma_size = 30!!
+        if (i >=(gamma_size//2)):
+            OF_reformat[i] = -total_OF_tang[44-i]
 
-    return total_OF_tang
+    return OF_reformat
 
 def control_calc(num_harmonics, gamma_size, Qdot_meas):
-    a_0 = 0
+    a_0 = 0.0
     min_threshold = .3
 
     # Controller Parameters
-    k_0 = 1 
-    c_psi = 1 
-    c_d = 1
+    k_0 = 1.0 
+    c_psi = 1.0 
+    c_d = 1.0
 
-    dg = 1/gamma_size
-    gamma = np.linspace(0, 2*math.pi-dg, gamma_size)
+    gamma = np.linspace(-math.pi, math.pi-.017, gamma_size)
+    dg = gamma[2] - gamma[1];
     Qdot_WF = [0]*gamma_size
     Qdot_SF = [0]*gamma_size
     
-    a = [0]*num_harmonics
-    b = [0]*num_harmonics
+    a = [0.0]*num_harmonics
+    b = [0.0]*num_harmonics
     # Initialize the Coefficients
     for n in range(num_harmonics):
-        a[n] = 0
-        b[n] = 0
+        a[n] = 0.0
+        b[n] = 0.0
  
     # Compute a_0
     for i in range(gamma_size):
-        a_0 += math.cos(0*gamma[i])*Qdot_meas[i]
-    a_0 /= math.pi
+        a_0 = a_0 + math.cos(0*gamma[i])*Qdot_meas[i]
+    a_0 = a_0*dg/math.pi
 
     # Compute the rest of the coefficients
     for n in range(num_harmonics):
         for i in range(gamma_size):
-            a[n] += math.cos(n*gamma[i])*Qdot_meas[i]
-            b[n] += math.sin(n*gamma[i])*Qdot_meas[i] 
-        a[n] *= dg/math.pi
-        b[n] *= dg/math.pi
+            a[n] = a[n] + math.cos((n+1)*gamma[i])*Qdot_meas[i]
+            b[n] = b[n] + math.sin((n+1)*gamma[i])*Qdot_meas[i] 
+        a[n] = a[n]*dg/math.pi
+        b[n] = b[n]*dg/math.pi
 
     # Calculate Qdot_WF
-    for n in range(num_harmonics):
-        for i in range(gamma_size):
-            Qdot_WF[i] += a[n]*math.cos(n*gamma[i]) + b[n]*math.sin(n*gamma[i])
-    Qdot_WF[:] = [x + a_0/2 for x in Qdot_WF]
+    for i in range(gamma_size):
+        for n in range(num_harmonics):
+            Qdot_WF[i] = Qdot_WF[i] + a[n]*math.cos((n+1)*gamma[i]) + b[n]*math.sin((n+1)*gamma[i])
+        Qdot_WF[i] = Qdot_WF[i] + a_0/2.0
 
     # Calculate Qdot_SF
     Qdot_SF = np.subtract(Qdot_meas, Qdot_WF)
 
-    # New mapping of gamma
-    gamma = np.linspace(-math.pi, math.pi-dg, gamma_size)
-    
     # Extract r_0 and d_0 from SF signal
     index_max = np.argmax(Qdot_SF)
     d_0 = Qdot_SF[index_max]
-    
-    # Place a threshold on the small object detection
-    if d_0 > min_threshold:
-        if Qdot_SF[index_max] > .1: 
-            if index_max <= gamma_size/2:
-                r_0 = gamma[gamma_size/2-index_max]
-            if index_max > gamma_size/2:
-                r_0 = gamma[gamma_size/2 + (gamma_size-index_max)] 
+   
 
+    if d_0 > min_threshold:
+        r_0 = gamma[index_max]    
         # Calculate the control signal
-        yaw_rate_cmd = k_0*np.sign(r_0)*math.exp(-c_psi*math.fabs(r_0))*math.exp(-c_d*math.fabs(d_0))
+        yaw_rate_cmd = k_0*np.sign(r_0)*math.exp(-c_psi*math.fabs(r_0))*math.exp(-c_d*1/(math.fabs(d_0)))
     else:
         yaw_rate_cmd = 0.0
 
-    return yaw_rate_cmd, a_0, a, b, Qdot_SF
+    return yaw_rate_cmd, a_0, a, b, Qdot_WF, Qdot_SF
 
 
 
@@ -175,7 +170,6 @@ class Optic_Flow_Calculator:
         
         # Lucas Kanade Publisher
         self.optic_flow_pub = rospy.Publisher("optic_flow/optic_flow", OpticFlowMsg, queue_size=10)
-        self.optic_flow_SF_pub = rospy.Publisher("optic_flow/optic_flow_SF", OpticFlowMsg, queue_size=10)
 
         # Publish fourier coefficients
         self.fourier_coef_pub = rospy.Publisher("optic_flow/fourier_coefs", FourierCoefsMsg, queue_size=10)        
@@ -196,10 +190,11 @@ class Optic_Flow_Calculator:
         self.gamma_size = 30
         self.num_harmonics = 4
         yaw_rate_cmd = 0
-        a = [0]*self.num_harmonics
-        b = [0]*self.num_harmonics
+        a = [0.0]*self.num_harmonics
+        b = [0.0]*self.num_harmonics
         a_0 = 0.0
-        Qdot_SF = [0]*self.gamma_size
+        Qdot_SF = [0.0]*self.gamma_size
+    
     def image_callback(self,image):
         try: # if there is an image
             # Acquire the image, and convert to single channel gray image
@@ -244,24 +239,27 @@ class Optic_Flow_Calculator:
             flow = new_position_of_tracked_points - self.points_to_track
             
             # draw the flow field
-           # draw_optic_flow_field(curr_image, self.points_to_track, flow)
-            message = OpticFlowMsg()
+            # draw_optic_flow_field(curr_image, self.points_to_track, flow)
+            
             # Compute Tangential OF
-            OF_tang = average_ring_flow(self, message, self.num_rings,self.gamma_size,flow)           
+            OF_tang = average_ring_flow(self, self.num_rings,self.gamma_size,flow)           
 
             # Compute Fourier coefficients and yaw ontrol Command
-            yaw_rate_cmd, a_0, a, b, Qdot_SF = control_calc(self.num_harmonics, self.gamma_size, OF_tang)
+            yaw_rate_cmd, a_0, a, b, Qdot_WF, Qdot_SF = control_calc(self.num_harmonics, self.gamma_size, OF_tang)
             
             # Publish and Qdot_SF msg
     	    msg = OpticFlowMsg()
+            msg.Qdot_meas = OF_tang
+            msg.Qdot_WF = Qdot_WF
             msg.Qdot_SF = Qdot_SF
-    	    self.optic_flow_SF_pub.publish(msg)
+    	    self.optic_flow_pub.publish(msg)
             
             # Publish yaw rate command
             msg = YawRateCmdMsg()
             msg.header.stamp = rospy.Time.now()
             msg.yaw_rate_cmd = yaw_rate_cmd            
             self.yaw_rate_cmd_pub.publish(msg)
+            
             # Publish Fourier Coefs
             msg = FourierCoefsMsg()
             msg.header.stamp = rospy.Time.now()
