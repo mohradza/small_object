@@ -1,8 +1,8 @@
 #!/usr/bin/env python
+from __future__ import division
 
 # ROS imports
 import roslib, rospy
-from __future__ import division
 # opencv imports
 import cv2
 
@@ -50,9 +50,9 @@ def define_rings_at_which_to_track_optic_flow(image, gamma_size, num_rings):
     x_center = int(image.shape[0]/2)
     y_center = int(image.shape[1]/2)
     # This needs to be changed for 320 x 240 image and parabolics mirror
-    inner_radius = 100 
-    dg=1/gamma_size 
-    gamma = np.linspace(0, 2*math.pi-dg, gamma_size)
+    inner_radius = 100  
+    gamma = np.linspace(0, 2*math.pi-.017, gamma_size)
+    dg = gamma[2] - gamma[1]
     dr = 5
    
     for ring in range(num_rings):
@@ -68,8 +68,7 @@ def define_rings_at_which_to_track_optic_flow(image, gamma_size, num_rings):
 def average_ring_flow(self, num_rings, gamma_size,flow):
     total_OF_tang = [0]*gamma_size
     OF_reformat = [0]*gamma_size
-    dg = 1/gamma_size
-    gamma = np.linspace(0, 2*math.pi-dg, gamma_size)
+    gamma = np.linspace(0, 2*math.pi-.017, gamma_size)
     for ring in range(num_rings):
        	for i in range(gamma_size):
           	index = ring*gamma_size + i
@@ -82,10 +81,13 @@ def average_ring_flow(self, num_rings, gamma_size,flow):
     
     # Reformat so that optic flow is -pi -> pi
     for i in range(gamma_size):
-        if (i < (gamma_size/2)):
-            OF_reformat[i] = -total_OF_tang[gamma_size/2 - i]
-        if (i >=(gamma_size/2)):
-            OF_reformat[i] = -total_OF_tang[gamma_size/2 - (gamma_size/2-i)]
+        # For the case of gamma_size = 30
+        # gamma_size/2 = 15
+        if (i < (gamma_size//2)):
+            OF_reformat[i] = -total_OF_tang[gamma_size//2 - i]
+        # THIS IS SPECIFIC TO gamma_size = 30!!
+        if (i >=(gamma_size//2)):
+            OF_reformat[i] = -total_OF_tang[44-i]
 
     return OF_reformat
 
@@ -98,9 +100,8 @@ def control_calc(num_harmonics, gamma_size, Qdot_meas):
     c_psi = 1.0 
     c_d = 1.0
 
+    gamma = np.linspace(-math.pi, math.pi-.017, gamma_size)
     dg = gamma[2] - gamma[1];
-
-    gamma = np.linspace(-math.pi, math.pi-dg, gamma_size)
     Qdot_WF = [0]*gamma_size
     Qdot_SF = [0]*gamma_size
     
@@ -127,7 +128,7 @@ def control_calc(num_harmonics, gamma_size, Qdot_meas):
     # Calculate Qdot_WF
     for i in range(gamma_size):
         for n in range(num_harmonics):
-            Qdot_WF[i] = Wdot_WF[i] + a[n]*math.cos((n+1)*gamma[i]) + b[n]*math.sin((n+1)*gamma[i])
+            Qdot_WF[i] = Qdot_WF[i] + a[n]*math.cos((n+1)*gamma[i]) + b[n]*math.sin((n+1)*gamma[i])
         Qdot_WF[i] = Qdot_WF[i] + a_0/2.0
 
     # Calculate Qdot_SF
