@@ -17,9 +17,9 @@ from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
 
 # message imports specific to this package
-from optic_flow_code.msg import OpticFlowMsg
-from optic_flow_code.msg import FourierCoefsMsg
-from optic_flow_code.msg import YawRateCmdMsg
+from small_object.msg import OpticFlowMsg
+from small_object.msg import FourierCoefsMsg
+from small_object.msg import YawRateCmdMsg
 from std_msgs.msg import Float32
 ################################################################################
 
